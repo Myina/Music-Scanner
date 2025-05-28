@@ -26,7 +26,7 @@ class Program
         try
         {
             Console.WriteLine("\ud83c\udfb5 Music File Processor \ud83c\udfb5");
-            Console.WriteLine("=========================");
+            Console.WriteLine("==========================");
             Console.WriteLine();
 
             string rootFolder = args.Length > 0 ? args[0] : string.Empty;
@@ -55,6 +55,9 @@ class Program
             Timer.Stop();
             await progressTask;
             PrintSummary();
+
+            PrintColor($"Press any key to exit", ConsoleColor.DarkRed);
+            Console.ReadKey(); // Wait for user input before exiting
         }
         catch (Exception ex)
         {
@@ -81,9 +84,7 @@ class Program
                     Interlocked.Add(ref _totalBytesProcessed, fileInfo.Length);
 
                     var hash = await ComputeFileHashAsync(file);
-                    FileHashes.AddOrUpdate(hash,
-                        _ => new HashSet<string> { file },
-                        (_, set) => { set.Add(file); return set; });
+                    FileHashes.AddOrUpdate(hash, _ => [file], (_, set) => { set.Add(file); return set; });
 
                     Interlocked.Increment(ref _totalFilesScanned);
 
@@ -218,6 +219,12 @@ class Program
         var filenameWithoutExt = Path.GetFileNameWithoutExtension(desiredPath);
         var extension = Path.GetExtension(desiredPath);
 
+        // remove unwanted characters and normalize the filename
+        filenameWithoutExt = filenameWithoutExt.Replace(".", string.Empty, StringComparison.InvariantCultureIgnoreCase);
+        filenameWithoutExt = filenameWithoutExt.Replace("-", string.Empty, StringComparison.InvariantCultureIgnoreCase);
+        filenameWithoutExt = filenameWithoutExt.Replace("_", string.Empty, StringComparison.InvariantCultureIgnoreCase);
+        filenameWithoutExt = filenameWithoutExt.Replace("www", string.Empty, StringComparison.InvariantCultureIgnoreCase);
+
         var counter = 1;
         string newPath;
         do
@@ -264,7 +271,7 @@ class Program
                 PrintColor($"  Processing speed: {filesPerSecond:N1} files/sec ({mbPerSecond:N1} MB/sec)", ConsoleColor.Magenta);
                 PrintColor($"  Elapsed time: {elapsed:hh\\:mm\\:ss}", ConsoleColor.White);
 
-                await Task.Delay(500);
+                await Task.Delay(512);
             }
             catch { }
         }
@@ -273,7 +280,7 @@ class Program
     private static void PrintSummary()
     {
         Console.WriteLine();
-        PrintColor("=== Processing Complete ===", ConsoleColor.Cyan);
+        PrintColor("===== Processing Complete =====", ConsoleColor.Cyan);
         PrintColor($"Total files scanned: {_totalFilesScanned:N0}", ConsoleColor.Green);
         PrintColor($"Total duplicates found: {_totalDuplicatesFound:N0}", ConsoleColor.Yellow);
         PrintColor($"Total files renamed: {_totalFilesRenamed:N0}", ConsoleColor.Cyan);
@@ -294,10 +301,18 @@ class Program
             }
 
             Console.WriteLine();
-            PrintColor("Press 'Y' to confirm deletion of duplicates, or any other key to exit without deleting.", ConsoleColor.Red);
-            if (Console.ReadKey().Key == ConsoleKey.Y)
+            PrintColor("Press 'Y' to confirm deletion of duplicates or Esc to cancel deletion.", ConsoleColor.Red);
+            if (Console.ReadKey().Key == ConsoleKey.Y | Console.ReadKey().Key.ToString().Equals("y", StringComparison.InvariantCultureIgnoreCase))
             {
                 DeleteDuplicateFiles();
+            } 
+            else if( Console.ReadKey().Key == ConsoleKey.Escape)
+            {
+                PrintColor("Deletion cancelled.", ConsoleColor.Yellow);
+            } 
+            else
+            {
+                PrintColor("Invalid input. Deletion cancelled.", ConsoleColor.Yellow);
             }
         }
     }
