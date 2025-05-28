@@ -83,16 +83,25 @@ class Program
                     var fileInfo = new FileInfo(file);
                     Interlocked.Add(ref _totalBytesProcessed, fileInfo.Length);
 
-                    var hash = await ComputeFileHashAsync(file);
-                    FileHashes.AddOrUpdate(hash, _ => [file], (_, set) => { set.Add(file); return set; });
-
-                    Interlocked.Increment(ref _totalFilesScanned);
-
-                    var normalizedFilename = NormalizeFilename(Path.GetFileNameWithoutExtension(file)) + Path.GetExtension(file).ToLowerInvariant();
-                    if (!string.Equals(Path.GetFileName(file), normalizedFilename, StringComparison.Ordinal))
+                    // remove empty or small files less than 32KB
+                    if (fileInfo.Length == 0 || fileInfo.Length < 32768) 
                     {
-                        var newPath = Path.Combine(Path.GetDirectoryName(file) ?? string.Empty, normalizedFilename);
-                        FilesToRename.Add((file, newPath));
+                        PrintColor($"Skipping empty or small file: {file}", ConsoleColor.Yellow);
+                        FilesToDelete.Add(file);
+                    }
+                    else
+                    {
+                        var hash = await ComputeFileHashAsync(file);
+                        FileHashes.AddOrUpdate(hash, _ => [file], (_, set) => { set.Add(file); return set; });
+
+                        Interlocked.Increment(ref _totalFilesScanned);
+
+                        var normalizedFilename = NormalizeFilename(Path.GetFileNameWithoutExtension(file)) + Path.GetExtension(file).ToLowerInvariant();
+                        if (!string.Equals(Path.GetFileName(file), normalizedFilename, StringComparison.Ordinal))
+                        {
+                            var newPath = Path.Combine(Path.GetDirectoryName(file) ?? string.Empty, normalizedFilename);
+                            FilesToRename.Add((file, newPath));
+                        }
                     }
                 }
                 catch (Exception ex)
