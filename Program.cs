@@ -4,20 +4,28 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 
+// Main class for the music file processor
 class Program
 {
+    // Supported music file extensions
     private static readonly string[] SupportedExtensions = { ".mp3", ".flac", ".wav", ".aac", ".ogg", ".m4a" };
+    // Stores file hashes and their file paths
     private static readonly ConcurrentDictionary<string, HashSet<string>> FileHashes = new();
+    // Files marked for deletion (duplicates or too small)
     private static readonly ConcurrentBag<string> FilesToDelete = [];
+    // Files to be renamed (old and new paths)
     private static readonly ConcurrentBag<(string OldPath, string NewPath)> FilesToRename = [];
+    // Directories to be renamed (old and new paths)
     private static readonly ConcurrentBag<(string OldPath, string NewPath)> DirectoriesToRename = [];
 
+    // Statistics counters
     private static int _totalFilesScanned;
     private static int _totalDuplicatesFound;
     private static int _totalFilesRenamed;
     private static long _totalBytesProcessed;
     private static readonly Stopwatch Timer = new();
 
+    // Entry point: handles user input, starts processing, and prints summary
     static async Task Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
@@ -29,6 +37,7 @@ class Program
             Console.WriteLine("==========================");
             Console.WriteLine();
 
+            // Get root folder from args or prompt user
             string rootFolder = args.Length > 0 ? args[0] : string.Empty;
             if (string.IsNullOrWhiteSpace(rootFolder))
             {
@@ -36,6 +45,7 @@ class Program
                 rootFolder = Console.ReadLine()?.Trim() ?? string.Empty;
             }
 
+            // Validate root folder
             if (string.IsNullOrWhiteSpace(rootFolder) || !Directory.Exists(rootFolder))
             {
                 PrintColor("Valid root folder path is required.", ConsoleColor.Red);
@@ -45,19 +55,20 @@ class Program
             Timer.Start();
             PrintColor($"Starting processing at: {DateTime.Now:HH:mm:ss}", ConsoleColor.Cyan);
 
+            // Start progress reporting in background
             var progressTask = Task.Run(ReportProgress);
-            await ProcessDirectoryAsync(rootFolder);
-            ProcessDuplicates();
-            await RenameFilesAsync();
-            await RenameDirectoriesAsync(rootFolder);
-            RemoveEmptyDirectories(rootFolder);
+            await ProcessDirectoryAsync(rootFolder); // Scan and process files/directories
+            ProcessDuplicates();                     // Identify duplicates
+            await RenameFilesAsync();                // Rename files as needed
+            await RenameDirectoriesAsync(rootFolder);// Rename directories as needed
+            RemoveEmptyDirectories(rootFolder);      // Remove empty directories
 
             Timer.Stop();
             await progressTask;
-            PrintSummary();
+            PrintSummary();                          // Show summary and prompt for deletion
 
             PrintColor($"Press any key to exit", ConsoleColor.DarkRed);
-            Console.ReadKey(); // Wait for user input before exiting
+            Console.ReadKey();
         }
         catch (Exception ex)
         {
@@ -69,6 +80,7 @@ class Program
         }
     }
 
+    // Recursively process a directory: scan files, hash, mark for rename/delete, and recurse into subdirs
     private static async Task ProcessDirectoryAsync(string directory)
     {
         try
@@ -83,19 +95,21 @@ class Program
                     var fileInfo = new FileInfo(file);
                     Interlocked.Add(ref _totalBytesProcessed, fileInfo.Length);
 
-                    // remove empty or small files less than 32KB
-                    if (fileInfo.Length == 0 || fileInfo.Length < 32768) 
+                    // Skip and mark for deletion if file is empty or too small
+                    if (fileInfo.Length == 0 || fileInfo.Length < 31968) 
                     {
                         PrintColor($"Skipping empty or small file: {file}", ConsoleColor.Yellow);
                         FilesToDelete.Add(file);
                     }
                     else
                     {
+                        // Compute hash and track file
                         var hash = await ComputeFileHashAsync(file);
                         FileHashes.AddOrUpdate(hash, _ => [file], (_, set) => { set.Add(file); return set; });
 
                         Interlocked.Increment(ref _totalFilesScanned);
 
+                        // Normalize filename and mark for rename if needed
                         var normalizedFilename = NormalizeFilename(Path.GetFileNameWithoutExtension(file)) + Path.GetExtension(file).ToLowerInvariant();
                         if (!string.Equals(Path.GetFileName(file), normalizedFilename, StringComparison.Ordinal))
                         {
@@ -110,6 +124,7 @@ class Program
                 }
             });
 
+            // Process subdirectories and mark for rename if needed
             var subDirs = Directory.EnumerateDirectories(directory);
             foreach (var subDir in subDirs)
             {
@@ -133,6 +148,7 @@ class Program
         }
     }
 
+    // Compute SHA-256 hash of a file asynchronously
     private static async Task<string> ComputeFileHashAsync(string filePath)
     {
         const int bufferSize = 81920;
@@ -142,10 +158,12 @@ class Program
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
+    // Identify duplicate files by hash and mark them for deletion
     private static void ProcessDuplicates()
     {
         foreach (var hashEntry in FileHashes.Where(x => x.Value.Count > 1))
         {
+            // Prefer to keep file in deeper directory, then by shortest name
             var sortedFiles = hashEntry.Value
                 .OrderByDescending(f => f.Split(Path.DirectorySeparatorChar).Length)
                 .ThenBy(f => f.Length)
@@ -159,6 +177,7 @@ class Program
         }
     }
 
+    // Rename files to normalized names, ensuring uniqueness
     private static async Task RenameFilesAsync()
     {
         foreach (var (oldPath, newPath) in FilesToRename)
@@ -180,6 +199,7 @@ class Program
         }
     }
 
+    // Rename directories to normalized names, deepest first
     private static async Task RenameDirectoriesAsync(string rootFolder)
     {
         foreach (var (oldPath, newPath) in DirectoriesToRename.OrderByDescending(d => d.OldPath.Length))
@@ -199,6 +219,7 @@ class Program
         }
     }
 
+    // Recursively remove empty directories
     private static void RemoveEmptyDirectories(string startLocation)
     {
         foreach (var directory in Directory.GetDirectories(startLocation))
@@ -220,6 +241,7 @@ class Program
         }
     }
 
+    // Generate a unique filename if the desired one already exists
     private static string GetUniqueFilename(string desiredPath)
     {
         if (!File.Exists(desiredPath)) return desiredPath;
@@ -228,7 +250,7 @@ class Program
         var filenameWithoutExt = Path.GetFileNameWithoutExtension(desiredPath);
         var extension = Path.GetExtension(desiredPath);
 
-        // remove unwanted characters and normalize the filename
+        // Remove unwanted characters from filename
         filenameWithoutExt = filenameWithoutExt.Replace(".", string.Empty, StringComparison.InvariantCultureIgnoreCase);
         filenameWithoutExt = filenameWithoutExt.Replace("-", string.Empty, StringComparison.InvariantCultureIgnoreCase);
         filenameWithoutExt = filenameWithoutExt.Replace("_", string.Empty, StringComparison.InvariantCultureIgnoreCase);
@@ -245,6 +267,7 @@ class Program
         return newPath;
     }
 
+    // Normalize filename: remove invalid chars, title case, strip special chars
     private static string NormalizeFilename(string filename)
     {
         var invalidChars = Regex.Escape(new string(Path.GetInvalidFileNameChars()));
@@ -259,6 +282,7 @@ class Program
         return cleaned.Trim();
     }
 
+    // Display real-time progress in the console
     private static async Task ReportProgress()
     {
         var startLeft = Console.CursorLeft;
@@ -286,6 +310,7 @@ class Program
         }
     }
 
+    // Print summary and prompt user to confirm deletion of duplicates
     private static void PrintSummary()
     {
         Console.WriteLine();
@@ -326,6 +351,7 @@ class Program
         }
     }
 
+    // Delete files marked as duplicates
     private static void DeleteDuplicateFiles()
     {
         Console.WriteLine();
@@ -349,6 +375,7 @@ class Program
         PrintColor($"Deleted {deletedCount:N0} duplicate files.", ConsoleColor.Green);
     }
 
+    // Print a message in a specific color
     private static void PrintColor(string message, ConsoleColor color)
     {
         var originalColor = Console.ForegroundColor;
