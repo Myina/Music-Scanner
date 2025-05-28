@@ -92,6 +92,7 @@ Files scanned: 1,204
 
 - [x] Empty directory removal after duplicate deletion
 - [x] Normalize casing for remaining folder names
+- [x] Remove empty or file smaller than 32KB
 - [ ] Optionally move duplicates to a recycle bin instead of deleting
 
 ---
